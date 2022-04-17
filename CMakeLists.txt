@@ -112,6 +112,7 @@ target_include_directories(
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  "${CMAKE_BINARY_DIR}/include/${PROJECT_NAME_LOWERCASE}"
 )
 
 message(STATUS "Finished setting up include directories.")
@@ -146,3 +147,9 @@ install(
   DESTINATION
   include/${PROJECT_NAME_LOWERCASE}
 )
+
+
+get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
+foreach(dir ${dirs})
+  message(STATUS "dir='${dir}'")
+endforeach()

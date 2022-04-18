@@ -5,174 +5,342 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <array>
+#include <map>
 
 #include "version.hpp"
+#include "md5.h"
 
-class FileWrapper {
- public:
-  template <typename T>
-  bool Set(T&& str) {
-    m_hash_val = 0;
-    m_file_path = std::forward<T>(str);
 
-    std::ifstream ifs(m_file_path, std::ios_base::binary);
+class FileIdentity
+{
+public:
+    FileIdentity() = default;
 
-    if (!ifs.is_open()) {
-      m_file_path.clear();
-      return false;
+    template <typename T>
+    explicit FileIdentity(T&& str) : m_file_path(std::forward<T>(str)) {
+        std::error_code ec;
+        m_is_reg_file = std::filesystem::is_regular_file(m_file_path, ec);
     }
 
-    std::hash<char> hs;
-    while (!ifs.eof()) {
-      char byte;
-      ifs.read(&byte, 1);
+    std::size_t GetFileSize() const {
+        if (m_file_size != 0) {
+            return m_file_size;
+        }
 
-      m_hash_val ^= (hs(byte) << 1);  // or use boost::hash_combine
+        std::error_code ec;
+        m_file_size = std::filesystem::file_size(m_file_path, ec);
+        return m_file_size;
     }
 
-    return false;
-  }
+    std::string GetHash() const {
+        if (!m_hash_val.empty()) {
+            return m_hash_val;
+        }
 
-  const std::string& GetFilePath() const { return m_file_path; }
+        std::ifstream ifs(m_file_path, std::ios_base::binary);
 
-  std::size_t GetHashValue() const { return m_hash_val; }
+        if (!ifs.is_open()) {
+            m_hash_val.clear();
+            m_is_valid = false;
+            return m_hash_val;
+        }
 
- private:
-  std::string m_file_path;
-  std::size_t m_hash_val{0};
+        MD5 md5;
+        static constexpr auto CHUNK_SIZE = MD5::BlockSize;
+        std::array<char, CHUNK_SIZE> buffer{ 0 };
+        size_t bytes_red = 0u;
+        while (!ifs.eof()) {
+            ifs.read(buffer.data(), CHUNK_SIZE);
+            auto N = static_cast<std::size_t>(ifs.gcount());
+            bytes_red += N;
+
+            md5.add(buffer.data(), N);
+        }
+
+        if (bytes_red == GetFileSize()) {
+            //it is ok
+            m_hash_val = md5.getHash();
+            m_is_valid = true;
+        }
+
+        return m_hash_val;
+    }
+
+    bool IsValid() const {
+        return m_is_valid;
+    }
+
+    bool IsRegular() const {
+        return m_is_reg_file;
+    }
+
+    const std::string& GetFilePath() const {
+        return m_file_path;
+    }
+
+private:
+    std::string                 m_file_path;
+    mutable std::string         m_hash_val;
+    mutable std::size_t         m_file_size{ 0 };
+    mutable bool                m_is_valid{ false };
+    bool                        m_is_reg_file{ false };
 };
 
-bool operator==(const FileWrapper& f1, const FileWrapper& f2) {
-  std::ifstream if1(f1.GetFilePath());
-  std::ifstream if2(f2.GetFilePath());
+bool operator==(const FileIdentity& f1, const FileIdentity& f2) {
 
-  if (!if1.is_open() || !if2.is_open()) {
-    return false;
-  }
-
-  while (!if1.eof() && !if2.eof()) {
-    char byte1;
-    char byte2;
-    if1.read(&byte1, 1);
-    if2.read(&byte2, 1);
-
-    if (byte1 != byte2) {
-      return false;
+    if (!f1.IsRegular() ||
+        !f2.IsRegular()) {
+        return false;
     }
-  }
 
-  return if1.eof() && if2.eof();
+    if (f1.GetFileSize() != f2.GetFileSize()) {
+        return false;
+    }
+
+    if (f1.GetHash() != f2.GetHash()) {
+        return false;
+    }
+
+    return f1.IsValid() && f2.IsValid();
 }
 
 struct MyHash {
-  std::size_t operator()(const FileWrapper& f) const noexcept {
-    return f.GetHashValue();  // or use boost::hash_combine
-  }
+    auto operator()(const FileIdentity& f) const noexcept {
+        return f.GetHash();  // or use boost::hash_combine
+    }
 };
 
 class DupsFinder {
- public:
-  using TheSamePair = std::pair<std::string, std::string>;
+public:
+    using TheSamePair = std::pair<std::string, std::string>;
+    using Result = std::pair<std::vector<TheSamePair>, bool>;
 
-  using Result = std::pair<std::vector<TheSamePair>, bool>;
+    DupsFinder() = default;
 
-  DupsFinder() = default;
+    template <typename Td1, typename Td2>
+    Result Find(Td1&& d1_path, Td2&& d2_path) {
+        std::filesystem::directory_entry pd1{ std::forward<Td1>(d1_path) };
+        std::filesystem::directory_entry pd2{ std::forward<Td2>(d2_path) };
 
-  template <typename Td1, typename Td2>
-  Result Find(Td1&& d1_path, Td2&& d2_path) {
-    std::filesystem::directory_entry pd1{std::forward<Td1>(d1_path)};
-    std::filesystem::directory_entry pd2{std::forward<Td2>(d2_path)};
+        if (!pd1.is_directory() || !pd2.is_directory()) {
+            return Result{ {}, false };
+        }
 
-    if (!pd1.is_directory() || !pd2.is_directory()) {
-      return Result{{}, false};
+        auto d1_files = _get_directory_content(pd1);
+        auto d2_files = _get_directory_content(pd2);
+
+        if (std::filesystem::equivalent(pd1.path(), pd2.path())) {
+            std::cout << "Directories are the same\n";
+
+            if (d1_files.size() != d2_files.size()) {
+                return Result{ {}, false };
+            }
+
+            auto N = d1_files.size();
+            std::vector<TheSamePair> res;
+            res.reserve(N);
+            for (auto i = 0u; i < N; ++i) {
+                res.emplace_back(std::make_pair(d1_files[i].GetFilePath(), d2_files[i].GetFilePath()));
+            }
+
+            return Result{ std::move(res), true };
+        }
+
+        //===========================================================================
+        //read one directory
+        auto mpp = _get_files_map(d1_files);
+
+        std::vector<TheSamePair> res_pairs;
+        //===========================================================================
+        for (const auto& fi : d2_files) {
+            auto fit = mpp.find(fi.GetFileSize());
+            if (fit == mpp.end()) {
+                continue;
+            }
+
+            std::cout << "Find the same size " << fit->first << " of " << fit->second.size() << " files\n";
+            for (const auto& p : fit->second) {
+                auto res = (fi == p);
+                std::cout << "Check equality " << fi.GetFilePath() << " == " << p.GetFilePath() << " ? " << res << "\n";
+                if (res) {
+                    std::cout << "Hash: " << fi.GetHash() << "\n";
+                    res_pairs.emplace_back(std::make_pair(fi.GetFilePath(), p.GetFilePath()));
+                }
+            }
+        }
+
+        return Result{ std::move(res_pairs), true};
     }
 
-    auto d1_files = _get_directory_content(pd1);
-    auto d2_files = _get_directory_content(pd2);
+private:
+    std::vector<FileIdentity> _get_directory_content(
+        const std::filesystem::directory_entry& dir) const {
+        std::filesystem::directory_iterator dir_iter{ dir };
 
-    if (std::filesystem::equivalent(pd1.path(), pd2.path())) {
-      std::cout << "Directories are the same\n";
+        std::cout << "Content of directory " << dir.path() << ":\n";
+        auto regular_files_cnter = std::count_if(
+            std::filesystem::begin(dir_iter), std::filesystem::end(dir_iter),
+            [](const auto& de) {
+                std::cout << "directory entry: " << de.path()
+                    << ", is regulart file: " << de.is_regular_file() << "\n";
+                return de.is_regular_file();
+            });
 
-      if (d1_files.size() != d2_files.size()) {
-        return Result{{}, false};
-      }
+        std::cout << "End\n\n";
 
-      auto N = d1_files.size();
-      std::vector<TheSamePair> res;
-      res.reserve(N);
-      for (auto i = 0u; i < N; ++i) {
-        res.emplace_back(std::make_pair(d1_files[i], d2_files[i]));
-      }
+        std::vector<FileIdentity> regular_files;
+        regular_files.reserve(static_cast<std::size_t>(regular_files_cnter));
 
-      return Result{std::move(res), true};
+        for (const auto& de : std::filesystem::directory_iterator{ dir }) {
+            if (de.is_regular_file()) {
+                regular_files.emplace_back(de.path().string());
+            }
+        }
+
+        return regular_files;
     }
 
+    std::unordered_map<std::size_t, std::vector<FileIdentity>>
+        _get_files_map(const std::vector<FileIdentity>& files) {
 
-    std::unordered_map<FileWrapper, std::vector<std::string>, MyHash> mp;
+        std::unordered_map<std::size_t, std::vector<FileIdentity>> mp;
+        for (const auto& f : files) {
+            mp[f.GetFileSize()].push_back(f);
+        }
+        return mp;
+    }
+};
 
-    return Result{{}, true};
-  }
-
- private:
-  std::vector<std::filesystem::path> _get_directory_content(
-      const std::filesystem::directory_entry& dir) const {
-    std::filesystem::directory_iterator dir_iter{dir};
+std::vector<FileIdentity> _get_directory_content(
+    const std::filesystem::directory_entry& dir) {
+    std::filesystem::directory_iterator dir_iter{ dir };
 
     std::cout << "Content of directory " << dir.path() << ":\n";
     auto regular_files_cnter = std::count_if(
         std::filesystem::begin(dir_iter), std::filesystem::end(dir_iter),
         [](const auto& de) {
-          std::cout << "directory entry: " << de.path()
-                    << ", is regulart file: " << de.is_regular_file() << "\n";
-          return de.is_regular_file();
+            std::cout << "directory entry: " << de.path()
+                << ", is regulart file: " << de.is_regular_file() << "\n";
+            return de.is_regular_file();
         });
 
     std::cout << "End\n\n";
 
-    std::vector<std::filesystem::path> regular_files;
+    std::vector<FileIdentity> regular_files;
     regular_files.reserve(regular_files_cnter);
 
-    for (const auto& de : std::filesystem::directory_iterator{dir}) {
-      if (de.is_regular_file()) {
-        regular_files.push_back(de.path());
-      }
+    for (const auto& de : std::filesystem::directory_iterator{ dir }) {
+        FileIdentity fi(de.path().string());
+        if (fi.IsRegular()) {
+            regular_files.emplace_back(std::move(fi));
+        }
     }
 
     return regular_files;
-  }
-};
+}
 
-int main(int argc, const char** argv) {
-  std::cout << "\n=============================================\n";
-  std::cout << "Program starts";
-  std::cout << "\n=============================================\n";
+void map_test() {
+    std::unordered_map<std::size_t, std::vector<FileIdentity>> mpp;
 
-  auto rc = 0;
+    auto d1_files = _get_directory_content(std::filesystem::directory_entry{ "D:\\work" });
 
-  try {
-    /* code */
-    DupsFinder df;
-
-    auto [dups, res] = df.Find("/home/aleksey/work/duplicates",
-                               "/home/aleksey/work/duplicates");
-
-    if (res) {
-      std::cout << "Duplicates:\n";
-
-      for (const auto& p : dups) {
-        std::cout << p.first << " = " << p.second << "\n";
-      }
+    for (const auto& fi : d1_files) {
+        mpp[fi.GetFileSize()].push_back(fi);
     }
 
-    rc = !res;
-  } catch (const std::exception& e) {
-    std::cerr << "Exception in main: " << e.what() << '\n';
-    rc = 1;
-  }
+    auto d2_files = _get_directory_content(std::filesystem::directory_entry{ "D:\\work\\voip" });
+    for (const auto& fi : d2_files) {
+        auto fit = mpp.find(fi.GetFileSize());
+        if (fit == mpp.end()) {
+            continue;
+        }
 
-  std::cout << "\n=============================================\n";
-  std::cout << "Program ends";
-  std::cout << "\n=============================================\n";
+        std::cout << "Find the same size " << fit->first << " of " << fit->second.size() << " files\n";
+        for (const auto& p : fit->second) {
+            auto res = (fi == p);
+            std::cout << "Check equality " << fi.GetFilePath() << " == " << p.GetFilePath() << " ? " << res << "\n";
+            if (res) {
+                std::cout << "Hash: " << fi.GetHash() << "\n";
+            }
+        }
+    }
+}
 
-  return rc;
+template <typename Td1, typename Td2>
+void test(Td1&& d1_path, Td2&& d2_path) {
+    FileIdentity fi1(std::forward<Td1>(d1_path));
+    FileIdentity fi2(std::forward<Td2>(d2_path));
+
+    std::cout << "Test files: " << fi1.GetFilePath() << " and " << fi2.GetFilePath() << "... ";
+
+    auto res = fi1 == fi2;
+    std::cout << res << "!\n";
+}                                                               
+
+void identity_test() {
+    test("D:\\work\\logRST.txt",
+         "D:\\work\\logRST_copy.txt");
+
+    test("D:\\work\\FreeRTOSv202107.00.zip",
+         "D:\\work\\FreeRTOSv202107.00tt.zip");
+
+    test("D:\\work\\xpdf-4.03.tar",
+         "D:\\work\\FreeRTOSv202107.00tt.zip");
+
+    test("xpdf-4.03.tar",
+        "D:\\work\\FreeRTOSv202107.00tt.zip");
+
+    test("D:\\orel.ova",
+         "D:\\work\\inv_term_table.txt");
+
+    test("D:\\work",
+         "D:\\vbox");
+}
+
+
+int main(int argc, const char** argv) {
+    std::cout << "\n=============================================\n";
+    std::cout << "Program starts";
+    std::cout << "\n=============================================\n";
+
+    auto rc = 0;
+
+    std::string d1 = "D:\\work";
+    std::string d2 = "D:\\work\\voip";
+
+    if (argc != 3) {
+        std::cout << "Wrong arguments\n";
+    }
+    else {
+        d1 = argv[1];
+        d2 = argv[2];
+    }
+
+    try {
+
+        DupsFinder df;
+        auto [dups, res] = df.Find(d1, d2);
+
+        if (res) {
+            std::cout << "Duplicates:\n";
+
+            for (const auto& p : dups) {
+                std::cout << p.first << " = " << p.second << "\n";
+            }
+        }   
+
+        rc = !res;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Exception in main: " << e.what() << '\n';
+        rc = 1;
+    }
+
+    std::cout << "\n=============================================\n";
+    std::cout << "Program ends";
+    std::cout << "\n=============================================\n";
+
+    return rc;
 }

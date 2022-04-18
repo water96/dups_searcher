@@ -51,9 +51,6 @@ endif()
 # Enable package managers
 #
 
-#include(cmake/Conan.cmake)
-#nclude(cmake/Vcpkg.cmake)
-
 # Find all headers and implementation files
 include(cmake/SourcesAndHeaders.cmake)
 
@@ -66,6 +63,17 @@ if(${PROJECT_NAME}_VERBOSE_OUTPUT)
   endforeach()
 endif()
 
+if(${PROJECT_NAME}_ENABLE_UNIT_TESTING)
+    add_library(${PROJECT_NAME}_LIB ${headers} ${sources})
+
+    if(${PROJECT_NAME}_VERBOSE_OUTPUT)
+        verbose_message("Found the following headers:")
+        foreach(header IN LISTS headers)
+            verbose_message("* ${header}")
+        endforeach()
+    endif()
+endif()
+
 set_target_properties(
   ${PROJECT_NAME}
   PROPERTIES
@@ -74,12 +82,26 @@ set_target_properties(
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${CMAKE_BUILD_TYPE}"
 )
 
+if(${PROJECT_NAME}_BUILD_EXECUTABLE AND ${PROJECT_NAME}_ENABLE_UNIT_TESTING)
+  set_target_properties(
+    ${PROJECT_NAME}_LIB
+    PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${CMAKE_BUILD_TYPE}"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${CMAKE_BUILD_TYPE}"
+    OUTPUT_NAME ${PROJECT_NAME}
+  )
+endif()
+
 message(STATUS "Added all header and implementation files.\n")
 
 #
 # Set the project standard and warnings
 #
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
+
+if(${PROJECT_NAME}_BUILD_EXECUTABLE AND ${PROJECT_NAME}_ENABLE_UNIT_TESTING)
+    target_compile_features(${PROJECT_NAME}_LIB PUBLIC cxx_std_17)
+endif()
 
 include(cmake/CompilerWarnings.cmake)
 set_project_warnings(${PROJECT_NAME})
@@ -114,6 +136,16 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   "${CMAKE_BINARY_DIR}/include/${PROJECT_NAME_LOWERCASE}"
 )
+if(${PROJECT_NAME}_ENABLE_UNIT_TESTING)
+    target_include_directories(
+        ${PROJECT_NAME}_LIB
+        PUBLIC
+        $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+endif()
 
 message(STATUS "Finished setting up include directories.")
 
@@ -147,9 +179,3 @@ install(
   DESTINATION
   include/${PROJECT_NAME_LOWERCASE}
 )
-
-
-get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
-foreach(dir ${dirs})
-  message(STATUS "dir='${dir}'")
-endforeach()

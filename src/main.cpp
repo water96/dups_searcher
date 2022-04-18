@@ -106,12 +106,6 @@ bool operator==(const FileIdentity& f1, const FileIdentity& f2) {
     return f1.IsValid() && f2.IsValid();
 }
 
-struct MyHash {
-    auto operator()(const FileIdentity& f) const noexcept {
-        return f.GetHash();  // or use boost::hash_combine
-    }
-};
-
 class DupsFinder {
 public:
     using TheSamePair = std::pair<std::string, std::string>;
@@ -162,7 +156,8 @@ public:
 
             std::cout << "Find the same size " << fit->first << " of " << fit->second.size() << " files\n";
             for (const auto& p : fit->second) {
-                auto res = (fi == p);
+                auto res = !std::filesystem::equivalent(p.GetFilePath(), fi.GetFilePath()) &&
+                           (fi == p);
                 std::cout << "Check equality " << fi.GetFilePath() << " == " << p.GetFilePath() << " ? " << res << "\n";
                 if (res) {
                     std::cout << "Hash: " << fi.GetHash() << "\n";
@@ -177,7 +172,7 @@ public:
 private:
     std::vector<FileIdentity> _get_directory_content(
         const std::filesystem::directory_entry& dir) const {
-        std::filesystem::directory_iterator dir_iter{ dir };
+        std::filesystem::recursive_directory_iterator dir_iter{ dir };
 
         std::cout << "Content of directory " << dir.path() << ":\n";
         auto regular_files_cnter = std::count_if(
@@ -193,9 +188,11 @@ private:
         std::vector<FileIdentity> regular_files;
         regular_files.reserve(static_cast<std::size_t>(regular_files_cnter));
 
-        for (const auto& de : std::filesystem::directory_iterator{ dir }) {
-            if (de.is_regular_file()) {
-                regular_files.emplace_back(de.path().string());
+        for (const auto& de : std::filesystem::recursive_directory_iterator{ dir }) {
+            FileIdentity fi(de.path().string());
+            if (fi.IsRegular() &&
+                fi.GetFileSize()) {
+                regular_files.emplace_back(std::move(fi));
             }
         }
 
@@ -213,97 +210,38 @@ private:
     }
 };
 
-std::vector<FileIdentity> _get_directory_content(
-    const std::filesystem::directory_entry& dir) {
-    std::filesystem::directory_iterator dir_iter{ dir };
+#include "file.h"
 
-    std::cout << "Content of directory " << dir.path() << ":\n";
-    auto regular_files_cnter = std::count_if(
-        std::filesystem::begin(dir_iter), std::filesystem::end(dir_iter),
-        [](const auto& de) {
-            std::cout << "directory entry: " << de.path()
-                << ", is regulart file: " << de.is_regular_file() << "\n";
-            return de.is_regular_file();
-        });
+void test() {
+    fl::File f1("Dups.exe");
+    fl::File f2("Dups_copy.pdb");
 
-    std::cout << "End\n\n";
+    auto res = f1.IsOk();
+    res = f2.IsOk();
+    res = (f1 == f2);
 
-    std::vector<FileIdentity> regular_files;
-    regular_files.reserve(regular_files_cnter);
+    f1 = fl::File{ "Dups_copy1.pdb" };
+    f2 = fl::File{ "Dups_copy.pdb" };
 
-    for (const auto& de : std::filesystem::directory_iterator{ dir }) {
-        FileIdentity fi(de.path().string());
-        if (fi.IsRegular()) {
-            regular_files.emplace_back(std::move(fi));
-        }
-    }
+    res = f1.IsOk();
+    res = f2.IsOk();
+    res = (f1 == f2);
 
-    return regular_files;
+
+    f1 = fl::File{ "test" };
+    f2 = fl::File{ "test_copy" };
+
+    res = f1.IsOk();
+    res = f2.IsOk();
+    res = (f1 == f2);
 }
-
-void map_test() {
-    std::unordered_map<std::size_t, std::vector<FileIdentity>> mpp;
-
-    auto d1_files = _get_directory_content(std::filesystem::directory_entry{ "D:\\work" });
-
-    for (const auto& fi : d1_files) {
-        mpp[fi.GetFileSize()].push_back(fi);
-    }
-
-    auto d2_files = _get_directory_content(std::filesystem::directory_entry{ "D:\\work\\voip" });
-    for (const auto& fi : d2_files) {
-        auto fit = mpp.find(fi.GetFileSize());
-        if (fit == mpp.end()) {
-            continue;
-        }
-
-        std::cout << "Find the same size " << fit->first << " of " << fit->second.size() << " files\n";
-        for (const auto& p : fit->second) {
-            auto res = (fi == p);
-            std::cout << "Check equality " << fi.GetFilePath() << " == " << p.GetFilePath() << " ? " << res << "\n";
-            if (res) {
-                std::cout << "Hash: " << fi.GetHash() << "\n";
-            }
-        }
-    }
-}
-
-template <typename Td1, typename Td2>
-void test(Td1&& d1_path, Td2&& d2_path) {
-    FileIdentity fi1(std::forward<Td1>(d1_path));
-    FileIdentity fi2(std::forward<Td2>(d2_path));
-
-    std::cout << "Test files: " << fi1.GetFilePath() << " and " << fi2.GetFilePath() << "... ";
-
-    auto res = fi1 == fi2;
-    std::cout << res << "!\n";
-}                                                               
-
-void identity_test() {
-    test("D:\\work\\logRST.txt",
-         "D:\\work\\logRST_copy.txt");
-
-    test("D:\\work\\FreeRTOSv202107.00.zip",
-         "D:\\work\\FreeRTOSv202107.00tt.zip");
-
-    test("D:\\work\\xpdf-4.03.tar",
-         "D:\\work\\FreeRTOSv202107.00tt.zip");
-
-    test("xpdf-4.03.tar",
-        "D:\\work\\FreeRTOSv202107.00tt.zip");
-
-    test("D:\\orel.ova",
-         "D:\\work\\inv_term_table.txt");
-
-    test("D:\\work",
-         "D:\\vbox");
-}
-
 
 int main(int argc, const char** argv) {
     std::cout << "\n=============================================\n";
-    std::cout << "Program starts";
+    std::cout << "App starts";
     std::cout << "\n=============================================\n";
+
+    test();
 
     auto rc = 0;
 
@@ -339,7 +277,7 @@ int main(int argc, const char** argv) {
     }
 
     std::cout << "\n=============================================\n";
-    std::cout << "Program ends";
+    std::cout << "App ends";
     std::cout << "\n=============================================\n";
 
     return rc;

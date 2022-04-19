@@ -182,6 +182,8 @@ install(
 
 message(STATUS "Finished building requirements for installing the package.\n")
 
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_GLIBCXX_DEBUG")
+
 #
 # Unit testing setup
 #

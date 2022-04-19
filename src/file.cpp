@@ -43,7 +43,8 @@ std::size_t File::GetFileSize() const {
 }
 
 std::string File::GetHashSum() const {
-    if (!m_hash_val.empty()) {
+    if (!m_hash_val.empty() ||
+        !m_is_valid) {
         return m_hash_val;
     }
 

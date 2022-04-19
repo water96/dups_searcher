@@ -11,7 +11,19 @@ project(
 
 verbose_message("Adding tests under ${CMAKE_PROJECT_NAME}Tests...")
 
+if (UNIX)
+    set(GTest_ROOT "/mnt/shared/googletest-release-1.11.0")
+else() 
+     set(GTest_ROOT "D:\\shared\\googletest-release-1.11.0")
+endif()
 
+add_subdirectory(${GTest_ROOT} "${CMAKE_CURRENT_BINARY_DIR}/googletest" EXCLUDE_FROM_ALL)
+
+if(${CMAKE_PROJECT_NAME}_USE_GOOGLE_MOCK)
+  set(GOOGLE_MOCK_LIBRARIES GTest::gmock GTest::gmock_main)
+endif()
+
+#/mnt/shared/googletest-release-1.11.0
 
 foreach(file ${CMAKE_CURRENT_SOURCE_DIR}/${test_sources})
   string(REGEX REPLACE "(.*/)([a-zA-Z0-9_ ]+)(\.cpp)" "\\2" test_name ${file}) 
@@ -32,17 +44,6 @@ foreach(file ${CMAKE_CURRENT_SOURCE_DIR}/${test_sources})
     set(${CMAKE_PROJECT_NAME}_TEST_LIB ${CMAKE_PROJECT_NAME}_LIB)
   else()
     set(${CMAKE_PROJECT_NAME}_TEST_LIB ${CMAKE_PROJECT_NAME})
-  endif()
-
-  set(GTest_ROOT "D:\\shared\\googletest-release-1.11.0")
-
-  add_subdirectory(${GTest_ROOT}
-        "${CMAKE_CURRENT_BINARY_DIR}/googletest" EXCLUDE_FROM_ALL)
-
-  #find_package(GTest REQUIRED)
-
-  if(${CMAKE_PROJECT_NAME}_USE_GOOGLE_MOCK)
-    set(GOOGLE_MOCK_LIBRARIES GTest::gmock GTest::gmock_main)
   endif()
 
   target_link_libraries(

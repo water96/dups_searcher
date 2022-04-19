@@ -1,178 +1,170 @@
+#include <iostream>
+#include <memory>
+#include <list>
 #include <algorithm>
 #include <cassert>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <vector>
 
 #include "version.hpp"
+#include "md5.h"
+#include "searcher.h"
 
-class FileWrapper {
- public:
-  template <typename T>
-  bool Set(T&& str) {
-    m_hash_val = 0;
-    m_file_path = std::forward<T>(str);
-
-    std::ifstream ifs(m_file_path, std::ios_base::binary);
-
-    if (!ifs.is_open()) {
-      m_file_path.clear();
-      return false;
-    }
-
-    std::hash<char> hs;
-    while (!ifs.eof()) {
-      char byte;
-      ifs.read(&byte, 1);
-
-      m_hash_val ^= (hs(byte) << 1);  // or use boost::hash_combine
-    }
-
-    return false;
-  }
-
-  const std::string& GetFilePath() const { return m_file_path; }
-
-  std::size_t GetHashValue() const { return m_hash_val; }
-
- private:
-  std::string m_file_path;
-  std::size_t m_hash_val{0};
+class AppBase{
+public:
+    virtual ~AppBase() = default;
+    virtual bool ParseArgs(int argc, const char** argv) noexcept = 0;
+    virtual int Work() noexcept = 0;
 };
 
-bool operator==(const FileWrapper& f1, const FileWrapper& f2) {
-  std::ifstream if1(f1.GetFilePath());
-  std::ifstream if2(f2.GetFilePath());
+class App : public AppBase {
+public:
+    App() = default;
 
-  if (!if1.is_open() || !if2.is_open()) {
-    return false;
-  }
+    bool ParseArgs(int argc, const char** argv) noexcept override {
+        if (argc != 3) {
+            std::cerr << "Usage: dups FILE1 FILE2\n";
+            return false;
+        }
 
-  while (!if1.eof() && !if2.eof()) {
-    char byte1;
-    char byte2;
-    if1.read(&byte1, 1);
-    if2.read(&byte2, 1);
-
-    if (byte1 != byte2) {
-      return false;
+        m_d1_path = argv[1];
+        m_d2_path = argv[2];
+        return true;
     }
-  }
 
-  return if1.eof() && if2.eof();
-}
+    int Work() noexcept override {
+        int rc = 0;
 
-struct MyHash {
-  std::size_t operator()(const FileWrapper& f) const noexcept {
-    return f.GetHashValue();  // or use boost::hash_combine
-  }
+        try {
+            std::cout << "Search duplicates between:\n - " << m_d1_path << "\n"
+                                                          << " - " << m_d2_path << "\n";
+
+            fl::DupsSearcher ds;
+
+            auto d1_content = ds.GetDirectoryContent(m_d1_path);
+            auto d2_content = ds.GetDirectoryContent(m_d2_path);
+
+            auto grouped_files = ds.GroupBySize(d1_content);
+
+            auto dups = ds.FindDuplicates(d2_content, grouped_files);
+
+            for (const auto& p : dups) {
+                std::cout << p.first << " = " << p.second << "\n";
+            }
+        }
+        catch (const std::exception& e) {
+            std::cerr << e.what() << '\n';
+            rc = 1;
+        }
+
+        return rc;
+    }
+
+private:
+    std::string     m_d1_path{};
+    std::string     m_d2_path{};
 };
 
-class DupsFinder {
- public:
-  using TheSamePair = std::pair<std::string, std::string>;
+class AppSeveralDirs : public AppBase {
+public:
+    AppSeveralDirs() = default;
 
-  using Result = std::pair<std::vector<TheSamePair>, bool>;
+    bool ParseArgs(int argc, const char** argv) noexcept override {
+        if (argc < 3) {
+            std::cerr << "Usage: dups FILE1 FILE2 ...\n";
+            return false;
+        }
 
-  DupsFinder() = default;
+        m_dirs.reserve(argc - 1);
+        for(auto i = 1; i < argc; ++i ){
+            m_dirs.emplace_back(argv[i]);
+        }
 
-  template <typename Td1, typename Td2>
-  Result Find(Td1&& d1_path, Td2&& d2_path) {
-    std::filesystem::directory_entry pd1{std::forward<Td1>(d1_path)};
-    std::filesystem::directory_entry pd2{std::forward<Td2>(d2_path)};
-
-    if (!pd1.is_directory() || !pd2.is_directory()) {
-      return Result{{}, false};
+        return true;
     }
 
-    auto d1_files = _get_directory_content(pd1);
-    auto d2_files = _get_directory_content(pd2);
+    int Work() noexcept override {
+        int rc = 0;
 
-    if (std::filesystem::equivalent(pd1.path(), pd2.path())) {
-      std::cout << "Directories are the same\n";
+        try {
 
-      if (d1_files.size() != d2_files.size()) {
-        return Result{{}, false};
-      }
+            //get content of all dirs
+            std::list<std::vector<fl::File>> content;
 
-      auto N = d1_files.size();
-      std::vector<TheSamePair> res;
-      res.reserve(N);
-      for (auto i = 0u; i < N; ++i) {
-        res.emplace_back(std::make_pair(d1_files[i], d2_files[i]));
-      }
+            auto min_size_dir = std::numeric_limits<std::size_t>::max();
+            for(const auto& dir_path : m_dirs){
+                auto dir_cont = m_dub_searcher.GetDirectoryContent(dir_path);
+                if(dir_cont.size() < min_size_dir){
+                    content.emplace_front(std::move(dir_cont));
+                }
+                else{
+                    content.emplace_back(std::move(dir_cont));
+                }
 
-      return Result{std::move(res), true};
+                min_size_dir = content.front().size();
+            }
+
+            //the first vect in list has the smallest len. Extract it
+            m_min_dir_content = std::move(content.front());
+            content.pop_front();
+            //==================================
+
+            //Create vector of maps grouped by size
+            m_grouped_by_size_content.clear();
+            m_grouped_by_size_content.reserve(content.size());
+
+            for(const auto& dir_content : content){
+                m_grouped_by_size_content.emplace_back(m_dub_searcher.GroupBySize(dir_content));
+            }
+            //=================================
+
+            //main processing is here - determine vector of common objects between all dirs
+            for(const auto& group : m_grouped_by_size_content){
+                auto dups = m_dub_searcher.GetDuplicates(m_min_dir_content, group);
+                m_min_dir_content = std::move(dups);
+                if(m_min_dir_content.empty()){
+                    break;
+                }
+            }
+            //==========================
+
+            PrintResults();
+        }
+        catch (const std::exception& e) {
+            std::cerr << e.what() << '\n';
+            rc = 1;
+        }
+
+        return rc;
     }
 
+    void PrintResults() const{
+        for (const auto& p : m_min_dir_content) {
+            std::cout << p.GetFilePath() << " =\n";
 
-    std::unordered_map<FileWrapper, std::vector<std::string>, MyHash> mp;
-
-    return Result{{}, true};
-  }
-
- private:
-  std::vector<std::filesystem::path> _get_directory_content(
-      const std::filesystem::directory_entry& dir) const {
-    std::filesystem::directory_iterator dir_iter{dir};
-
-    std::cout << "Content of directory " << dir.path() << ":\n";
-    auto regular_files_cnter = std::count_if(
-        std::filesystem::begin(dir_iter), std::filesystem::end(dir_iter),
-        [](const auto& de) {
-          std::cout << "directory entry: " << de.path()
-                    << ", is regulart file: " << de.is_regular_file() << "\n";
-          return de.is_regular_file();
-        });
-
-    std::cout << "End\n\n";
-
-    std::vector<std::filesystem::path> regular_files;
-    regular_files.reserve(regular_files_cnter);
-
-    for (const auto& de : std::filesystem::directory_iterator{dir}) {
-      if (de.is_regular_file()) {
-        regular_files.push_back(de.path());
-      }
+            for(const auto& group : m_grouped_by_size_content){
+                const auto & vec = group.at(p.GetFileSize());
+                for(const auto& fi : vec){
+                    if( p == fi){
+                        std::cout << "\t= " << fi.GetFilePath() << "\n";
+                    }
+                }
+            }
+        }
     }
 
-    return regular_files;
-  }
+private:
+    std::vector<std::string>                        m_dirs;
+    fl::DupsSearcher                                m_dub_searcher;
+    std::vector<fl::File>                           m_min_dir_content;
+    std::vector<fl::DupsSearcher::GroupedFiles>     m_grouped_by_size_content;
 };
 
 int main(int argc, const char** argv) {
-  std::cout << "\n=============================================\n";
-  std::cout << "Program starts";
-  std::cout << "\n=============================================\n";
 
-  auto rc = 0;
+    auto app = std::make_unique<App>();
 
-  try {
-    /* code */
-    DupsFinder df;
-
-    auto [dups, res] = df.Find("/home/aleksey/work/duplicates",
-                               "/home/aleksey/work/duplicates");
-
-    if (res) {
-      std::cout << "Duplicates:\n";
-
-      for (const auto& p : dups) {
-        std::cout << p.first << " = " << p.second << "\n";
-      }
+    if(!app->ParseArgs(argc, argv)){
+        return 1;
     }
 
-    rc = !res;
-  } catch (const std::exception& e) {
-    std::cerr << "Exception in main: " << e.what() << '\n';
-    rc = 1;
-  }
-
-  std::cout << "\n=============================================\n";
-  std::cout << "Program ends";
-  std::cout << "\n=============================================\n";
-
-  return rc;
+    return app->Work();
 }

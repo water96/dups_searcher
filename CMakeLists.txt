@@ -179,3 +179,15 @@ install(
   DESTINATION
   include/${PROJECT_NAME_LOWERCASE}
 )
+
+message(STATUS "Finished building requirements for installing the package.\n")
+
+#
+# Unit testing setup
+#
+
+if(${PROJECT_NAME}_ENABLE_UNIT_TESTING)
+  enable_testing()
+  message(STATUS "Build unit tests for the project. Tests should always be found in the test folder\n")
+  add_subdirectory(test)
+endif()

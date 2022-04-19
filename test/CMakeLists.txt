@@ -11,6 +11,8 @@ project(
 
 verbose_message("Adding tests under ${CMAKE_PROJECT_NAME}Tests...")
 
+
+
 foreach(file ${CMAKE_CURRENT_SOURCE_DIR}/${test_sources})
   string(REGEX REPLACE "(.*/)([a-zA-Z0-9_ ]+)(\.cpp)" "\\2" test_name ${file}) 
   add_executable(${test_name}_Tests ${file})
@@ -32,14 +34,26 @@ foreach(file ${CMAKE_CURRENT_SOURCE_DIR}/${test_sources})
     set(${CMAKE_PROJECT_NAME}_TEST_LIB ${CMAKE_PROJECT_NAME})
   endif()
 
-  #target_link_libraries(
-  #  ${test_name}_Tests
-  #  PUBLIC
-  #    GTest::GTest
-  ##    GTest::Main
-  #    ${GOOGLE_MOCK_LIBRARIES}
-  #    ${${CMAKE_PROJECT_NAME}_TEST_LIB}
-  #)
+  set(GTest_ROOT "D:\\shared\\googletest-release-1.11.0")
+
+  add_subdirectory(${GTest_ROOT}
+        "${CMAKE_CURRENT_BINARY_DIR}/googletest" EXCLUDE_FROM_ALL)
+
+  #find_package(GTest REQUIRED)
+
+  if(${CMAKE_PROJECT_NAME}_USE_GOOGLE_MOCK)
+    set(GOOGLE_MOCK_LIBRARIES GTest::gmock GTest::gmock_main)
+  endif()
+
+  target_link_libraries(
+    ${test_name}_Tests
+    PUBLIC
+      gtest_main
+      ${GOOGLE_MOCK_LIBRARIES}
+      ${${CMAKE_PROJECT_NAME}_TEST_LIB}
+  )
+
+  add_compile_definitions(TEST_FILES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/in")
 
   #
   # Add the unit tests

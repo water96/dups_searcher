@@ -12,18 +12,13 @@ class File
 public:
     File() = default;
 
-    template <typename T>
-    explicit File(T&& str) : m_file_path(std::forward<T>(str)) {
-        std::error_code ec;
-        m_is_valid = std::filesystem::is_regular_file(m_file_path, ec);
-        if (m_is_valid) {
-            m_file_size = std::filesystem::file_size(m_file_path, ec);
-            if (ec) {
-                m_is_valid = false;
-            }
-        }
-    }
+    File(File&& f);
+    File& operator=(File&& f);
 
+    File(const File& f) = default;
+    File& operator=(const File& f) = default;
+
+    explicit File(std::string str);
     std::size_t GetFileSize() const;
     std::string GetHashSum() const;
     bool IsOk() const;

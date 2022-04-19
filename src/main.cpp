@@ -234,14 +234,13 @@ void test() {
     res = f1.IsOk();
     res = f2.IsOk();
     res = (f1 == f2);
+    std::cout << res << "\n";
 }
 
 int main(int argc, const char** argv) {
     std::cout << "\n=============================================\n";
     std::cout << "App starts";
     std::cout << "\n=============================================\n";
-
-    test();
 
     auto rc = 0;
 
@@ -257,6 +256,8 @@ int main(int argc, const char** argv) {
     }
 
     try {
+
+        test();
 
         DupsFinder df;
         auto [dups, res] = df.Find(d1, d2);

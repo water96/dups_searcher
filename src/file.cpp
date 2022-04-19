@@ -6,6 +6,37 @@
 
 namespace fl {
 
+File::File(std::string str) : m_file_path(std::move(str)) {
+    std::error_code ec;
+    m_is_valid = std::filesystem::is_regular_file(m_file_path, ec);
+    if (m_is_valid) {
+        m_file_size = std::filesystem::file_size(m_file_path, ec);
+        if (ec) {
+            m_is_valid = false;
+        }
+    }
+}
+
+File::File(File&& f) : m_file_path(std::move(f.m_file_path)),
+                       m_file_size(f.m_file_size),
+                       m_hash_val(std::move(f.m_hash_val)),
+                       m_is_valid(f.m_is_valid) {
+
+    f.m_file_size = 0;
+    f.m_is_valid = false;
+}
+
+File& File::operator=(File&& f) {
+    m_file_path = std::move(f.m_file_path);
+    m_file_size = f.m_file_size;
+    m_hash_val = std::move(f.m_hash_val);
+    m_is_valid = f.m_is_valid;
+
+    f.m_file_size = 0;
+    f.m_is_valid = 0;
+
+    return *this;
+}
 
 std::size_t File::GetFileSize() const {
     return m_file_size;

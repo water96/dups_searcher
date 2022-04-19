@@ -15,5 +15,5 @@ set(headers
 )
 
 set(test_sources
-    #src/file_test.cpp
+    src/file_test.cpp
 )

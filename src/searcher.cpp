@@ -47,5 +47,27 @@ std::vector<DupsSearcher::TheSamePair> DupsSearcher::FindDuplicates(const std::v
     return res_pairs;
 }
 
+std::vector<fl::File> DupsSearcher::GetDuplicates(const std::vector<fl::File>& content, const DupsSearcher::GroupedFiles& grouped) {
+
+    std::vector<fl::File> res;
+    res.reserve(content.size());
+    //===========================================================================
+    for (const auto& fi : content) {
+        auto fit = grouped.find(fi.GetFileSize());
+        if (fit == grouped.end()) {
+            continue;
+        }
+
+        for (const auto& p : fit->second) {
+            if (fi == p) {
+                res.push_back(fi);
+                break;
+            }
+        }
+    }
+
+    return res;
+}
+
 
 }

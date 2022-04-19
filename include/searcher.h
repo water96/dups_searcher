@@ -20,6 +20,7 @@ public:
 
     GroupedFiles GroupBySize(const std::vector<fl::File>& content);
     std::vector<TheSamePair> FindDuplicates(const std::vector<fl::File>& content, const GroupedFiles& grouped);
+    std::vector<fl::File> GetDuplicates(const std::vector<fl::File>& content, const DupsSearcher::GroupedFiles& grouped);
 
 private:
 

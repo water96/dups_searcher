@@ -49,7 +49,6 @@ std::string File::GetHashSum() const {
     }
 
     std::ifstream ifs(m_file_path, std::ios_base::binary);
-
     if (!ifs.is_open()) {
         m_hash_val.clear();
         m_is_valid = false;

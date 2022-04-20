@@ -5,28 +5,38 @@
 #include <cassert>
 
 #include "version.hpp"
-#include "md5.h"
 #include "searcher.h"
 
+//===========================================================
+//base class for application
 class AppBase{
 public:
     virtual ~AppBase() = default;
     virtual bool ParseArgs(int argc, const char** argv) noexcept = 0;
     virtual int Work() noexcept = 0;
 };
+//===========================================================
 
+//===========================================================
 class App : public AppBase {
 public:
     App() = default;
 
     bool ParseArgs(int argc, const char** argv) noexcept override {
+        assert(argv != nullptr);
+
         if (argc != 3) {
             std::cerr << "Usage: dups FILE1 FILE2\n";
             return false;
         }
 
-        m_d1_path = argv[1];
-        m_d2_path = argv[2];
+        if (argv[1]) {
+            m_d1_path = argv[1];
+        }
+
+        if (argv[2]) {
+            m_d2_path = argv[2];
+        }
         return true;
     }
 
@@ -34,17 +44,19 @@ public:
         int rc = 0;
 
         try {
-            std::cout << "Search duplicates between:\n - " << m_d1_path << "\n"
-                                                          << " - " << m_d2_path << "\n";
+            std::cout << "Search duplicates in dirs:\n - " << m_d1_path << "\n"
+                                                           << " - " << m_d2_path << "\n";
 
             fl::DupsSearcher ds;
 
             auto d1_content = ds.GetDirectoryContent(m_d1_path);
             auto d2_content = ds.GetDirectoryContent(m_d2_path);
 
+            //here we have content of both dirs
+            //group content of directory by size
             auto grouped_files = ds.GroupBySize(d1_content);
 
-            auto dups = ds.FindDuplicates(d2_content, grouped_files);
+            auto dups = ds.GetDuplicatedPairs(d2_content, grouped_files);
 
             for (const auto& p : dups) {
                 std::cout << p.first << " = " << p.second << "\n";
@@ -63,11 +75,15 @@ private:
     std::string     m_d2_path{};
 };
 
+//===========================================================
+//This implementation just for test - find duplicates in more than two directories (it works)
 class AppSeveralDirs : public AppBase {
 public:
     AppSeveralDirs() = default;
 
     bool ParseArgs(int argc, const char** argv) noexcept override {
+        assert(argv != nullptr);
+
         if (argc < 3) {
             std::cerr << "Usage: dups FILE1 FILE2 ...\n";
             return false;
@@ -75,7 +91,9 @@ public:
 
         m_dirs.reserve(argc - 1);
         for(auto i = 1; i < argc; ++i ){
-            m_dirs.emplace_back(argv[i]);
+            if (argv[i]) {
+                m_dirs.emplace_back(argv[i]);
+            }
         }
 
         return true;
@@ -102,7 +120,7 @@ public:
                 min_size_dir = content.front().size();
             }
 
-            //the first vect in list has the smallest len. Extract it
+            //the first vector in list has the smallest len. Extract it
             m_min_dir_content = std::move(content.front());
             content.pop_front();
             //==================================
@@ -118,7 +136,7 @@ public:
 
             //main processing is here - determine vector of common objects between all dirs
             for(const auto& group : m_grouped_by_size_content){
-                auto dups = m_dub_searcher.GetDuplicates(m_min_dir_content, group);
+                auto dups = m_dub_searcher.GetDuplicatedFiles(m_min_dir_content, group);
                 m_min_dir_content = std::move(dups);
                 if(m_min_dir_content.empty()){
                     break;
@@ -157,6 +175,8 @@ private:
     std::vector<fl::File>                           m_min_dir_content;
     std::vector<fl::DupsSearcher::GroupedFiles>     m_grouped_by_size_content;
 };
+
+//===========================================================
 
 int main(int argc, const char** argv) {
 

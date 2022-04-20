@@ -16,8 +16,8 @@ option(${PROJECT_NAME}_WARNINGS_AS_ERRORS "Treat compiler warnings as errors." O
 # Unit testing
 #
 
-option(${PROJECT_NAME}_ENABLE_UNIT_TESTING "Enable unit tests for the projects (from the `test` subfolder)." ON)
-option(${PROJECT_NAME}_USE_GTEST "Use the GoogleTest project for creating unit tests." OFF)
+option(${PROJECT_NAME}_ENABLE_UNIT_TESTING "Enable unit tests for the projects (from the `test` subfolder)." OFF)
+option(${PROJECT_NAME}_USE_GTEST "Use the GoogleTest project for creating unit tests." ON)
 
 #
 # Static analyzers
